@@ -203,21 +203,50 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    
-    # چک کردن مسدودی
-    if get_user_status(user_id) == "banned":
-        await update.message.reply_text("⛔️ شما مسدود هستید.")
-        return
+    try:
+        user_id = str(update.effective_user.id)
+        
+        if get_user_status(user_id) == "banned":
+            await update.message.reply_text("⛔️ شما مسدود هستید.")
+            return
 
-    # چک کردن عضویت در کانال
-    if not await is_member(update, context):
+        if context.user_data.get('state') == 'waiting_for_admin_msg':
+            user_msg = update.message.text
+            admin_text = f"📩 <b>پیام ناشناس جدید:</b>\n\n<i>{user_msg}</i>\n\n👤 برای پاسخ کلیک کنید:"
+            reply_kb = InlineKeyboardMarkup([[InlineKeyboardButton("↩️ پاسخ به این کاربر", callback_data=f"reply_{user_id}")]])
+            try:
+                await context.bot.send_message(chat_id=ADMIN_ID, text=admin_text, parse_mode=ParseMode.HTML, reply_markup=reply_kb)
+                await update.message.reply_text("✅ پیام شما ارسال شد.")
+            except:
+                await update.message.reply_text("❌ خطا.")
+            context.user_data['state'] = None
+            return
+
+        if update.effective_user.id == ADMIN_ID and context.user_data.get('state', '').startswith('reply_'):
+            target_user = context.user_data['state'].replace('reply_', '')
+            try:
+                await context.bot.send_message(chat_id=target_user, text=f"📬 <b>پاسخ مدیریت:</b>\n\n<i>{update.message.text}</i>", parse_mode=ParseMode.HTML)
+                await update.message.reply_text("✅ ارسال شد.")
+            except:
+                await update.message.reply_text("❌ کاربر بلاک کرده.")
+            context.user_data['state'] = None
+            return
+
+        url = update.message.text
+        if not url.startswith("http"):
+            await update.message.reply_text("❌ لینک معتبر بفرست.")
+            return
+
+        context.user_data['url'] = url
+        
         keyboard = [
-            [InlineKeyboardButton("📢 عضویت در کانال", url=f"https://t.me/{CHANNEL_USERNAME.replace('@', '')}")],
-            [InlineKeyboardButton("✅ عضو شدم", callback_data="check_join")]
+            [InlineKeyboardButton("🎬 ویدیو (MP4)", callback_data="dl_video")],
+            [InlineKeyboardButton("🎵 صدا (MP3)", callback_data="dl_audio")]
         ]
-        await update.message.reply_text("⛔️ <b>دسترسی محدود!</b>\nبرای استفاده از ربات، اول باید توی کانال ما عضو بشی 👇", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
-        return
+        await update.message.reply_text("لینک دریافت شد ✅\nچی می‌خوای؟ 👇", reply_markup=InlineKeyboardMarkup(keyboard))
+    
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ خطا: {str(e)}")
 
     # سیستم پیام ناشناس
     if context.user_data.get('state') == 'waiting_for_admin_msg':
