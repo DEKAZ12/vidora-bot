@@ -315,12 +315,21 @@ def main():
     app.add_handler(CallbackQueryHandler(cancel_admin_msg_callback, pattern="cancel_admin_msg"))
     app.add_handler(CallbackQueryHandler(check_join_callback, pattern="check_join"))
     app.add_handler(CallbackQueryHandler(download_callback, pattern="dl_"))
-    
-    # هندلرهای منو (help, about, invite, settings)
-    from telegram.ext import CallbackQueryHandler
-    app.add_handler(CallbackQueryHandler(lambda u, c: u.callback_query.edit_message_text("📖 راهنما..."), pattern="help"))
-    app.add_handler(CallbackQueryHandler(lambda u, c: u.callback_query.edit_message_text("⚙️ تنظیمات..."), pattern="settings"))
-    app.add_handler(CallbackQueryHandler(lambda u, c: u.callback_query.edit_message_text("🎁 سیستم دعوت..."), pattern="invite"))
+
+    # منوهای تنظیمات (help, about, invite, settings)
+    async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        if query.data == "help":
+            await query.edit_message_text("📖 راهنما:\nکافیه لینک رو بفرستی تا برات دانلود کنم.")
+        elif query.data == "about":
+            await query.edit_message_text("ℹ️ ربات حرفه‌ای Vidora\nنسخه 3.0")
+        elif query.data == "invite":
+            await query.edit_message_text("🎁 برای دعوت دوستان، از منوی استارت استفاده کن.")
+        elif query.data == "settings":
+            await query.edit_message_text("⚙️ تنظیمات به زودی اضافه می‌شود.")
+
+    app.add_handler(CallbackQueryHandler(menu_callback, pattern="^(help|about|invite|settings)$"))
 
     print("✅ ربات با موفقیت روشن شد!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
