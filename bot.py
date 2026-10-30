@@ -189,17 +189,14 @@ def download_tiktok(url: str):
         return None, None
 
 def download_ytdlp(url: str):
-    """
-    دانلود ویدیو از یوتیوب، اینستاگرام و... با استفاده از yt-dlp
-    کیفیت بالا و حجم زیر ۵۰ مگابایت برای ارسال در تلگرام
-    """
     ydl_opts = {
         'outtmpl': 'downloads/%(id)s.%(ext)s',
         'quiet': True,
         'no_warnings': True,
         'noplaylist': True,
-        'impersonate': 'chrome', # دور زدن محدودیت اینستاگرام
+        'impersonate': 'chrome',
         'format': 'best[filesize<49M]/bestvideo[filesize<49M]+bestaudio/best',
+        'extractor_args': {'youtube': {'player_client': ['android', 'web']}}
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -297,31 +294,55 @@ async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.answer("❌ شما هنوز در تمام کانال‌ها عضو نشده‌اید!", show_alert=True)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    مدیریت تمام پیام‌های متنی دریافتی (لینک‌ها، پیام‌های ناشناس، و تنظیمات ادمین)
-    """
     try:
-        # جلوگیری از باگ‌های غیرمتنی (مثل استیکر یا عکس)
-        if not update.message or not update.message.text:
+        if not update.message:
+            return
+
+        # دریافت متن یا کپشن (برای لینک‌هایی که با پیش‌نمایش می‌آیند)
+        text = update.message.text or update.message.caption
+        if not text:
             return
 
         user_id = update.effective_user.id
+        url = text.strip()
+        
+        # ۱. اگر پیام یک لینک بود
+        if url.startswith("http"):
+            context.user_data['state'] = None
+            
+            if not await check_membership(update, context):
+                await update.message.reply_text("⛔️ ابتدا باید در کانال‌ها عضو شوید.", reply_markup=get_join_keyboard())
+                return
+                
+            if not check_daily_limit(user_id):
+                await update.message.reply_text(f"⚠️ <b>محدودیت روزانه!</b>\nشما امروز {DAILY_LIMIT} ویدیو دانلود کرده‌اید.", parse_mode=ParseMode.HTML)
+                return
+
+            context.user_data['url'] = url
+            
+            if "tiktok" in url: site = "تیک‌تاک (بدون واترمارک)"
+            elif "instagram" in url: site = "اینستاگرام"
+            elif "youtu" in url: site = "یوتیوب"
+            else: site = "ویدیو"
+
+            keyboard = [[InlineKeyboardButton("🎬 دانلود ویدیو (MP4)", callback_data="dl_video")]]
+            await update.message.reply_text(f"✅ لینک <b>{site}</b> دریافت شد.\nبرای شروع پردازش کلیک کنید 👇", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
+            return
+
+        # ۲. حالت‌های ادمین و کاربر
         state = context.user_data.get('state', '')
         
-        # ==========================================
-        # پردازش‌های مخصوص ادمین
-        # ==========================================
         if user_id == ADMIN_ID:
             if state == 'waiting_for_broadcast':
                 context.user_data['state'] = None
                 data = load_data()
                 success = 0
-                await update.message.reply_text("⏳ در حال ارسال پیام همگانی...")
+                await update.message.reply_text("⏳ در حال ارسال...")
                 for uid in data["users"].keys():
                     try:
-                        await context.bot.send_message(chat_id=uid, text=update.message.text)
+                        await context.bot.send_message(chat_id=uid, text=text)
                         success += 1
-                        await asyncio.sleep(0.05) # جلوگیری از بلاک شدن توسط تلگرام
+                        await asyncio.sleep(0.05)
                     except:
                         pass
                 await update.message.reply_text(f"✅ پیام برای {success} کاربر ارسال شد.")
@@ -329,80 +350,53 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
             elif state == 'waiting_for_channel_add':
                 context.user_data['state'] = None
-                new_channel = update.message.text
+                new_channel = text.strip()
                 if not new_channel.startswith('@'):
                     new_channel = '@' + new_channel
                 data = load_data()
                 if new_channel not in data["channels"]:
                     data["channels"].append(new_channel)
                     save_data(data)
-                    await update.message.reply_text(f"✅ کانال {new_channel} با موفقیت به لیست جوین اجباری اضافه شد.")
+                    await update.message.reply_text(f"✅ کانال {new_channel} اضافه شد.")
                 else:
-                    await update.message.reply_text("این کانال از قبل در لیست وجود دارد.")
+                    await update.message.reply_text("این کانال از قبل وجود دارد.")
                 return
 
             elif state.startswith('reply_to_'):
                 target_user = state.replace('reply_to_', '')
                 context.user_data['state'] = None
                 try:
-                    await context.bot.send_message(chat_id=target_user, text=f"📬 <b>پاسخ ادمین:</b>\n\n{update.message.text}", parse_mode=ParseMode.HTML)
-                    await update.message.reply_text("✅ پاسخ شما با موفقیت ارسال شد.")
+                    await context.bot.send_message(chat_id=target_user, text=f"📬 <b>پاسخ ادمین:</b>\n\n{text}", parse_mode=ParseMode.HTML)
+                    await update.message.reply_text("✅ پاسخ ارسال شد.")
                 except:
                     await update.message.reply_text("❌ کاربر ربات را بلاک کرده است.")
                 return
 
-        # ==========================================
-        # پردازش‌های کاربر عادی
-        # ==========================================
         if state == 'waiting_for_admin_msg':
             context.user_data['state'] = None
             data = load_data()
             msg_id = len(data["admin_messages"]) + 1
-            
-            # ذخیره پیام در دیتابیس
             data["admin_messages"].append({
                 "id": msg_id,
                 "user_id": str(user_id),
-                "text": update.message.text,
-                "date": str(datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
+                "text": text,"date": str(datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
             })
             save_data(data)
             
-            # ارسال به ادمین
-            admin_text = f"📩 <b>پیام ناشناس #{msg_id}</b>\n\n{update.message.text}"
+            admin_text = f"📩 <b>پیام ناشناس #{msg_id}</b>\n\n{text}"
             kb = InlineKeyboardMarkup([[InlineKeyboardButton("↩️ پاسخ", callback_data=f"reply_{user_id}")]])
             try:
                 await context.bot.send_message(chat_id=ADMIN_ID, text=admin_text, reply_markup=kb)
-                await update.message.reply_text("✅ پیام شما با موفقیت به ادمین ارسال شد.")
+                await update.message.reply_text("✅ پیام شما ارسال شد.")
             except:
-                await update.message.reply_text("❌ خطا در ارسال پیام به ادمین.")
+                await update.message.reply_text("❌ خطا در ارسال.")
             return
 
-        # اگر هیچ استیتی نداشت، یعنی دارد لینک می‌فرستد
-        url = update.message.text
-        if not url.startswith("http"):
-            await update.message.reply_text("❌ لطفاً یک لینک معتبر بفرستید.")
-            return
-
-        # بررسی عضویت مجدد برای اطمینان
-        if not await check_membership(update, context):
-            await update.message.reply_text("⛔️ ابتدا باید در کانال‌ها عضو شوید.", reply_markup=get_join_keyboard())
-            return
-            
-        # بررسی محدودیت روزانه
-        if not check_daily_limit(user_id):
-            await update.message.reply_text(f"⚠️ <b>محدودیت روزانه!</b>\nشما امروز {DAILY_LIMIT} ویدیو دانلود کرده‌اید. فردا دوباره تلاش کنید.", parse_mode=ParseMode.HTML)
-            return
-
-        # ذخیره لینک و نمایش دکمه دانلود
-        context.user_data['url'] = url
-        site = "تیک‌تاک (بدون واترمارک)" if "tiktok" in url else "اینستاگرام" if "instagram" in url else "یوتیوب" if "youtu" in url else "ویدیو"
-
-        keyboard = [[InlineKeyboardButton("🎬 دانلود ویدیو (MP4)", callback_data="dl_video")]]
-        await update.message.reply_text(f"✅ لینک <b>{site}</b> دریافت شد.\nبرای شروع پردازش کلیک کنید 👇", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.message.reply_text("❌ لطفاً یک لینک معتبر بفرستید یا از دکمه‌ها استفاده کنید.")
 
     except Exception as e:
         logger.error(f"Handler Error: {e}")
+        await update.message.reply_text(f"⚠️ خطای داخلی: {str(e)}")
 
 # ==============================================================================
 # 📥 بخش ۷: پردازش دانلود (Download Logic)
@@ -578,7 +572,7 @@ def main():
     app.add_handler(CommandHandler("admin", admin_command))
     
     # هندلر پیام‌ها
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
     
     # هندلرهای دکمه‌ها
     app.add_handler(CallbackQueryHandler(check_join_callback, pattern="check_join"))
